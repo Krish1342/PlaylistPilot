@@ -22,7 +22,7 @@ def validate_environment():
 validate_environment()
 
 # Use consistent database path
-DB_PATH = str(pathlib.Path(_file_).parent.resolve() / "spotify_tokens.db")
+DB_PATH = str(pathlib.Path(__file__).parent.resolve() / "spotify_tokens.db")
 
 def init_db():
     """Initialize the database connection"""

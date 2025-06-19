@@ -5,9 +5,9 @@ import sqlite3
 from dotenv import load_dotenv
 
 load_dotenv()
-app = Flask(_name_)
+app = Flask(__name__)
 import pathlib
-DB_PATH = str(pathlib.Path(_file_).parent.resolve() / "spotify_tokens.db")
+DB_PATH = str(pathlib.Path(__file__).parent.resolve() / "spotify_tokens.db")
 
 REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8080/callback")
 
@@ -62,5 +62,5 @@ def callback():
     store_token(username, token_info)
     return redirect(f"http://localhost:8501/?user={username}")
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     app.run(host="127.0.0.1", port=8080)
