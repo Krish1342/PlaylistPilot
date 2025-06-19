@@ -1,149 +1,129 @@
 import streamlit as st
-import requests
+import os
+import sqlite3
+from dotenv import load_dotenv
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
+import pathlib
 from app import AIEnhancedSpotifyGenerator
-import json
 
 st.set_page_config(page_title="PlaylistPilot", page_icon="🎧")
+load_dotenv()
 
-# Use Streamlit secrets for environment variables
-def get_env_var(key, default=None):
-    try:
-        return st.secrets[key]
-    except KeyError:
-        return default
+# Validate required environment variables
+def validate_environment():
+    required_vars = ["SPOTIPY_CLIENT_ID", "SPOTIPY_CLIENT_SECRET", "SPOTIPY_REDIRECT_URI", "GEMINI_API_KEY"]
+    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    
+    if missing_vars:
+        st.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+        st.stop()
 
-# Validate required secrets
-required_secrets = ["SPOTIPY_CLIENT_ID", "SPOTIPY_CLIENT_SECRET", "SPOTIPY_REDIRECT_URI", "GEMINI_API_KEY", "AUTH_SERVER_URL"]
-missing_secrets = [secret for secret in required_secrets if not get_env_var(secret)]
+validate_environment()
 
-if missing_secrets:
-    st.error(f"Missing required secrets: {', '.join(missing_secrets)}")
-    st.info("Please add these secrets in your Streamlit Community Cloud dashboard.")
-    st.stop()
+# Use consistent database path
+DB_PATH = str(pathlib.Path(_file_).parent.resolve() / "spotify_tokens.db")
 
-AUTH_SERVER_URL = get_env_var("AUTH_SERVER_URL")
+def init_db():
+    """Initialize the database connection"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tokens (
+            username TEXT PRIMARY KEY,
+            access_token TEXT,
+            refresh_token TEXT,
+            expires_at INTEGER
+        )
+    """)
+    conn.commit()
+    return conn
 
-# Token management via API calls to Flask server
-def get_token_from_server(username):
-    """Get token from Flask auth server"""
-    try:
-        response = requests.get(f"{AUTH_SERVER_URL}/get_token/{username}")
-        if response.status_code == 200:
-            return response.json()
-        return None
-    except Exception as e:
-        st.error(f"Error connecting to auth server: {e}")
-        return None
+def store_token(conn, username, token_info):
+    """Store token information in the database"""
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR REPLACE INTO tokens (username, access_token, refresh_token, expires_at)
+        VALUES (?, ?, ?, ?)
+    """, (username, token_info['access_token'], token_info['refresh_token'], token_info['expires_at']))
+    conn.commit()
 
-def store_token_on_server(username, token_info):
-    """Store token on Flask auth server"""
-    try:
-        response = requests.post(f"{AUTH_SERVER_URL}/store_token", json={
-            "username": username,
-            "token_info": token_info
-        })
-        return response.status_code == 200
-    except Exception as e:
-        st.error(f"Error storing token: {e}")
-        return False
+def get_token(conn, username):
+    """Retrieve token information from the database"""
+    cursor = conn.cursor()
+    cursor.execute("SELECT access_token, refresh_token, expires_at FROM tokens WHERE username = ?", (username,))
+    row = cursor.fetchone()
+    if row:
+        return {'access_token': row[0], 'refresh_token': row[1], 'expires_at': row[2]}
+    return None
 
-# Get username from query parameters
+class DBTokenHandler:
+    """Custom token handler for spotipy that uses database storage"""
+    def _init_(self, conn, username):
+        self.conn = conn
+        self.username = username
+    
+    def get_cached_token(self):
+        return get_token(self.conn, self.username)
+    
+    def save_token_to_cache(self, token_info):
+        store_token(self.conn, self.username, token_info)
+
+# Initialize database
+conn = init_db()
+
+# Get username from query parameters (fixed syntax)
 username = st.query_params.get("user")
 
 st.title("🎧 PlaylistPilot")
-st.markdown("*AI-powered Spotify playlist generator*")
 
 if not username:
-    st.subheader("🔐 Login to Get Started")
-    username = st.text_input("Enter your Spotify username or nickname:", 
-                           placeholder="e.g., john_doe")
-    
+    username = st.text_input("Enter your Spotify username or nickname:")
     if username:
-        login_url = f"{AUTH_SERVER_URL}/login/{username}"
-        st.markdown(f"""
-        ### Ready to generate your AI playlist?
-        
-        Click the button below to authenticate with Spotify:
-        
-        <a href="{login_url}" target="_blank">
-            <button style="
-                background-color: #1DB954;
-                color: white;
-                padding: 12px 24px;
-                border: none;
-                border-radius: 50px;
-                font-size: 16px;
-                font-weight: bold;
-                cursor: pointer;
-                text-decoration: none;
-                display: inline-block;
-                margin: 10px 0;
-            ">🎵 Connect with Spotify</button>
-        </a>
-        
-        *After authentication, you'll be redirected back here.*
-        """, unsafe_allow_html=True)
-    
-    st.info("💡 **How it works:**\n- Connect your Spotify account\n- AI analyzes your music taste\n- Get a personalized playlist created just for you!")
+       auth_host = os.getenv("AUTH_HOST", "127.0.0.1")
+       auth_port = os.getenv("AUTH_PORT", "8080")
+       auth_url =f"http://{auth_host}:{auth_port}/login/{username}"
+       st.markdown(f"[🔐 Click here to log in]({auth_url})")
     st.stop()
 
-# Check authentication status
-st.subheader(f"👋 Welcome back, {username}!")
-
-# For Streamlit Cloud, we'll use a simpler approach without the Flask token API
-# since we can't easily share the database between services
-if 'spotify_client' not in st.session_state:
-    st.warning("⚠️ Authentication required")
-    st.markdown(f"""
-    Please click the link below to authenticate:
-    
-    <a href="{AUTH_SERVER_URL}/login/{username}" target="_blank">
-        <button style="
-            background-color: #1DB954;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 25px;
-            font-size: 14px;
-            cursor: pointer;
-        ">🔄 Re-authenticate with Spotify</button>
-    </a>
-    """, unsafe_allow_html=True)
-    
-    # Manual token input as fallback
-    st.markdown("---")
-    st.subheader("🔧 Manual Token Input")
-    st.markdown("If you have authentication issues, you can manually enter your Spotify access token:")
-    
-    manual_token = st.text_input("Spotify Access Token:", type="password", 
-                                help="Get this from the Spotify Web API Console or your browser's developer tools")
-    
-    if manual_token:
-        try:
-            sp = spotipy.Spotify(auth=manual_token)
-            user_profile = sp.me()
-            st.session_state.spotify_client = sp
-            st.success(f"✅ Manually authenticated as {user_profile['display_name']}!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"❌ Invalid token: {e}")
-    
+# Check for existing token
+token_info = get_token(conn, username)
+if not token_info:
+    st.error("Token not found. Please login again.")
+    auth_host = os.getenv("AUTH_HOST", "127.0.0.1")
+    auth_port = os.getenv("AUTH_PORT", "8080")
+    st.markdown(f"[🔐 Re-login here](http://{auth_host}:{auth_port}/login/{username})")
     st.stop()
 
-# Use the authenticated Spotify client
-sp = st.session_state.spotify_client
+# Set up Spotify OAuth with database token handler
+sp_oauth = SpotifyOAuth(
+    client_id=os.getenv("SPOTIPY_CLIENT_ID"),
+    client_secret=os.getenv("SPOTIPY_CLIENT_SECRET"),
+    redirect_uri=os.getenv("SPOTIPY_REDIRECT_URI"),
+    scope="user-top-read playlist-modify-public playlist-modify-private user-library-read user-read-recently-played user-follow-read"
+)
+sp_oauth.cache_handler = DBTokenHandler(conn, username)
 
-# Display user info
+# Try to refresh token and create Spotify client
 try:
+    # Refresh the token if needed
+    if 'refresh_token' in token_info:
+        token_info = sp_oauth.refresh_access_token(token_info['refresh_token'])
+        store_token(conn, username, token_info)
+    
+    # Create Spotify client
+    sp = spotipy.Spotify(auth=token_info['access_token'])
+    
+    # Test the connection
     user_profile = sp.me()
-    st.success(f"✅ Connected as **{user_profile['display_name']}**")
+    st.success(f"Welcome, {user_profile['display_name']}!")
+    
 except Exception as e:
-    st.error("❌ Authentication expired. Please re-authenticate.")
-    if st.button("🔄 Re-authenticate"):
-        del st.session_state.spotify_client
-        st.rerun()
+    st.error(f"Failed to authenticate with Spotify: {e}")
+    st.error("Please try logging in again.")
+    auth_host = os.getenv("AUTH_HOST", "127.0.0.1")
+    auth_port = os.getenv("AUTH_PORT", "8080")
+    st.markdown(f"[🔐 Re-login here](http://{auth_host}:{auth_port}/login/{username})")
     st.stop()
 
 # Playlist customization UI
@@ -171,10 +151,10 @@ time_range = time_range_options[time_range_display]
 @st.cache_resource
 def get_generator():
     return AIEnhancedSpotifyGenerator(
-        client_id=get_env_var("SPOTIPY_CLIENT_ID"),
-        client_secret=get_env_var("SPOTIPY_CLIENT_SECRET"),
-        redirect_uri=get_env_var("SPOTIPY_REDIRECT_URI"),
-        gemini_api_key=get_env_var("GEMINI_API_KEY")
+        client_id=os.getenv("SPOTIPY_CLIENT_ID"),
+        client_secret=os.getenv("SPOTIPY_CLIENT_SECRET"),
+        redirect_uri=os.getenv("SPOTIPY_REDIRECT_URI"),
+        gemini_api_key=os.getenv("GEMINI_API_KEY")
     )
 
 generator = get_generator()
@@ -194,7 +174,6 @@ if st.button("🚀 Generate AI Playlist", type="primary"):
             )
             
             if playlist:
-                st.balloons()
                 st.success("🎉 Playlist created successfully!")
                 
                 # Display playlist info
@@ -204,15 +183,11 @@ if st.button("🚀 Generate AI Playlist", type="primary"):
                     st.markdown(f"📝 {playlist.get('description', 'AI-generated playlist')}")
                 
                 with col2:
-                    st.markdown(f"[🎧 **Open in Spotify**]({playlist['external_urls']['spotify']})")
-                    st.markdown(f"**Tracks:** {playlist.get('tracks', {}).get('total', 'N/A')}")
+                    st.markdown(f"[🎧 Open in Spotify]({playlist['external_urls']['spotify']})")
+                    st.markdown(f"*Tracks:* {playlist.get('tracks', {}).get('total', 'N/A')}")
                 
                 # Show some additional info
                 st.info("🤖 Your playlist has been created using AI analysis of your music taste. Check your Spotify app to see the full playlist!")
-                
-                # Option to generate another
-                if st.button("🔄 Generate Another Playlist"):
-                    st.rerun()
                 
             else:
                 st.error("❌ Failed to generate playlist. This could be due to:")
@@ -227,7 +202,7 @@ if st.button("🚀 Generate AI Playlist", type="primary"):
                 
         except Exception as e:
             st.error(f"❌ Error generating playlist: {str(e)}")
-            st.markdown("**Troubleshooting tips:**")
+            st.markdown("*Troubleshooting tips:*")
             st.markdown("""
             - Make sure you have listened to enough music on Spotify
             - Check your internet connection
@@ -258,4 +233,8 @@ with st.expander("📊 Your Music Stats", expanded=False):
 # Footer
 st.markdown("---")
 st.markdown("🤖 Powered by AI and the Spotify Web API")
-st.markdown("Made with ❤️ using Streamlit • [Source Code](https://github.com/your-username/playlist-pilot)")
+st.markdown("Made with ❤ using Streamlit")
+
+# Close database connection when done
+if st.session_state.get('cleanup_db', False):
+    conn.close()
