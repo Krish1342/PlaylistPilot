@@ -12,17 +12,8 @@ This project is a web application that generates personalized Spotify playlists 
 
 🌐 Web interface powered by Flask + Streamlit
 
-📸 Screenshots
-<details> <summary>Click to expand</summary>
-Spotify login page
+[![Watch Demo](https://img.shields.io/badge/Watch-Demo%20Video-blue?style=for-the-badge&logo=google-drive)](https://drive.google.com/file/d/1lzYhDlADo204XiwuG69zi09DGihnxzrk/view?usp=drive_link)
 
-Input mood/activity
-
-Generated playlist display
-
-(You can insert screenshots/carousel here)
-
-</details>
 🛠️ Tech Stack
 Frontend: Streamlit
 
