@@ -80,9 +80,9 @@ st.title("🎧 PlaylistPilot")
 if not username:
     username = st.text_input("Enter your Spotify username or nickname:")
     if username:
-       auth_host = os.getenv("AUTH_HOST", "playlistpilot-production.up.railway.app")
-       auth_port = os.getenv("AUTH_PORT", "")
-       auth_url = f"https://{auth_host}/login/{username}" if not auth_port else f"http://{auth_host}:{auth_port}/login/{username}"
+       auth_host = os.getenv("AUTH_HOST", "127.0.0.1")
+       auth_port = os.getenv("AUTH_PORT", "8080")
+       auth_url =f"http://{auth_host}:{auth_port}/login/{username}"
        st.markdown(f"[🔐 Click here to log in]({auth_url})")
     st.stop()
 
