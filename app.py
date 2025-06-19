@@ -597,12 +597,74 @@ class AIEnhancedSpotifyGenerator:
             if playlist:
                 self.print_ai_playlist_summary(playlist, ai_analysis, playlist_concept, selected_tracks)
             
-            return playlist
+            return {
+            "selected_tracks": selected_tracks,
+            "playlist_concept": playlist_concept,
+            "description": description
+        }
+
             
         except Exception as e:
             logger.error(f"Error generating AI-enhanced playlist: {e}")
             return None
-    
+    def prepare_ai_playlist_preview(self, playlist_size=25, time_range='medium_term', 
+                                mood=None, theme=None, occasion=None):
+        try:
+            logger.info("Preparing AI-enhanced playlist preview...")
+
+            user = self.get_user_profile()
+            if not user:
+                logger.error("Could not get user profile")
+                return None
+
+            top_artists = self.get_top_artists(time_range=time_range)
+            top_tracks = self.get_top_tracks(time_range=time_range)
+            recently_played = self.get_recently_played()
+
+            if not top_artists and not top_tracks:
+                logger.error("Not enough data for preview")
+                return None
+
+            ai_analysis = self.analyze_music_with_ai(top_artists, top_tracks, recently_played)
+            playlist_concept = self.generate_ai_playlist_concept(mood, theme, occasion)
+
+            user_preferences = {
+                'artists': Counter([track['artists'][0]['name'] for track in top_tracks]),
+                'genres': Counter()
+            }
+
+            ai_search_queries = self.enhance_search_with_ai(ai_analysis, user_preferences)
+            concept_queries = playlist_concept.get('search_queries', [])
+            all_queries = ai_search_queries + concept_queries
+
+            candidate_tracks = self.search_tracks_advanced(all_queries, limit=15)
+            scored_tracks = self.score_tracks_with_ai_insights(candidate_tracks, ai_analysis, user_preferences)
+            user_track_lists = [top_tracks, recently_played]
+            unique_tracks = self.remove_duplicates_and_user_tracks(scored_tracks, user_track_lists)
+
+            selected_tracks = unique_tracks[:playlist_size]
+            track_uris = [track_data['track']['uri'] for track_data in selected_tracks]
+
+            raw_playlist_name = playlist_concept.get('playlist_name', f"AI Discovery - {datetime.now().strftime('%Y-%m-%d')}")
+            playlist_name = self.clean_playlist_name(raw_playlist_name)
+            primary_genres = ', '.join(ai_analysis.get('primary_genres', [])[:3])
+            description = f"AI-curated playlist. Genres: {primary_genres}. Mood: {playlist_concept.get('target_mood', 'Balanced')}. Generated {datetime.now().strftime('%Y-%m-%d')}"
+            if len(description) > 300:
+                description = description[:297] + "..."
+
+            return {
+                "selected_tracks": selected_tracks,
+                "playlist_concept": playlist_concept,
+                "description": description,
+                "playlist_name": playlist_name,
+                "track_uris": track_uris,
+                "user_id": user['id']
+            }
+
+        except Exception as e:
+            logger.error(f"Error preparing AI-enhanced playlist preview: {e}")
+            return None
+
     def print_ai_playlist_summary(self, playlist, ai_analysis, playlist_concept, selected_tracks):
         """Print detailed summary of the AI-generated playlist"""
         
